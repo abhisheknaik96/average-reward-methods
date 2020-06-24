@@ -4,7 +4,8 @@ import numpy as np
 
 class TwoStatesTransientMDP(OneHotEnv):
     """
-    Implements a simple MDP which will cause divergence in RVI-Q learning (Abounadi et al. 2001)
+    Implements a simple MDP which will cause divergence in RVI-Q learning (Abounadi et al. 2001).
+    (Figure C.2 in the accompanying paper)
     """
 
     def __init__(self):

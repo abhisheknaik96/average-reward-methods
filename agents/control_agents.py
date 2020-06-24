@@ -210,12 +210,6 @@ class DifferentialQlearningAgent_v1(LFAControlAgent):
         maximum lower-order action value for the given observation.
         Note: this is not max_a q_f(s,a)
         """
-        # q_s = np.array([self.get_value(self.get_representation(observation, a)) for a in self.actions])
-        # max_action = self.rand_generator.choice(np.argwhere(q_s == np.amax(q_s)).flatten())
-        #
-        # q_f_s = np.array([self.get_value_f(self.get_representation(observation, a)) for a in self.actions])
-        # return q_f_s[max_action]
-
         q_f_sa = self.get_value_f(self.get_representation(observation, self.max_action))
         return q_f_sa
 
@@ -226,7 +220,6 @@ class DifferentialQlearningAgent_v1(LFAControlAgent):
         self.avg_value = 0.0
         self.alpha_w_f = agent_info.get("alpha_w_f", 0.1)
         self.eta_f = agent_info.get("eta_f", 1)
-        # self.alpha_r_f = agent_info.get("alpha_r_f", self.alpha_w_f)
         self.alpha_r_f = self.eta_f * self.alpha_w_f
 
     def agent_step(self, reward, observation):
@@ -246,41 +239,6 @@ class DifferentialQlearningAgent_v1(LFAControlAgent):
         delta = reward - self.avg_reward + self.max_action_value(observation) - self.get_value(self.past_state)
         self.weights += self.alpha_w * delta * self.past_state
         # self.avg_reward += self.beta * (reward - self.avg_reward)
-        self.avg_reward += self.alpha_r * delta
-        delta_f = self.get_value(self.past_state) - self.avg_value + \
-                  self.max_action_value_f(observation) - self.get_value_f(self.past_state)
-        self.weights_f += self.alpha_w_f * delta_f * self.past_state
-        self.avg_value += self.alpha_r_f * delta_f
-
-        action = self.choose_action(observation)
-        state = self.get_representation(observation, action)
-        self.past_state = state
-        self.past_action = action
-        # self.step_size *= 0.9995
-        # self.beta *= 0.9995
-
-        return self.past_action
-
-
-class DifferentialQlearningAgent_v2(DifferentialQlearningAgent_v1):
-    """
-    Extends the newly-proposed Differential Q-learning algorithm
-    such that centering affects the learning process
-    """
-
-    def agent_step(self, reward, observation):
-        """A step taken by the agent.
-        Performs the Direct RL step, chooses the next action.
-        Args:
-            reward (float): the reward received for taking the last action taken
-            observation : ndarray
-                the state observation from the environment's step based on where
-                the agent ended up after the last step
-        Returns:
-            (integer) The action the agent takes given this observation.
-        """
-        delta = reward - self.avg_reward + self.max_action_value(observation) - self.get_value(self.past_state)
-        self.weights += self.alpha_w * (delta - self.avg_value) * self.past_state
         self.avg_reward += self.alpha_r * delta
         delta_f = self.get_value(self.past_state) - self.avg_value + \
                   self.max_action_value_f(observation) - self.get_value_f(self.past_state)

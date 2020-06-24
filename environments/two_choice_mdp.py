@@ -3,7 +3,8 @@ import numpy as np
 
 class TwoChoiceMDP(OneHotEnv):
     """
-    Implements the environment from ToDo: add citation here
+    Implements a variant of the environment from Mahadevan (1994),
+    also used in this form by Naik et al. (2019) (https://arxiv.org/abs/1910.02140).
     """
 
     def __init__(self):

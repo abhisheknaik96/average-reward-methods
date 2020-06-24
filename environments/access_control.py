@@ -3,11 +3,8 @@ import numpy as np
 
 
 class AccessControl(BaseEnvironment):
-    """Implements the environment for an RLGlue environment
-
-    Note:
-        env_init, env_start, env_step, env_cleanup, and env_message are required
-        methods.
+    """
+    Implements the Access Control Queueing task as described in Chapter 10 by Sutton and Barto (2018).
     """
 
     def __init__(self):
@@ -31,13 +28,9 @@ class AccessControl(BaseEnvironment):
             indicating if it's terminal.
         """
 
-        # self.num_servers = env_info.get('num_servers', 10)
-        # self.num_priorities = env_info.get('num_priorities', 4)
         self.priorities = [2 ** i for i in range(self.num_priorities)]
         self.prob_server_free = env_info.get('prob_server_free', 0.06)  # probability a server becomes free at every timestep
 
-        # self.num_states = (self.num_servers + 1) * self.num_priorities
-        # self.num_actions = 2
         self.actions = [0, 1]
 
         self.rand_generator = np.random.RandomState(env_info.get('random_seed', 42))

@@ -214,7 +214,7 @@ class DifferentialTDAgent(LFAPredictionAgent):
 
         self.past_state = state
         self.past_action = action
-        # ToDo: very hacky; make more general
+        # ToDo: very hacky and specific to state 0's actions in TwoLoop; make more general
         self.past_rho = self.pi[self.past_action] / self.b[self.past_action] if self.past_state[0]==1 else 1.0
 
         return self.past_action

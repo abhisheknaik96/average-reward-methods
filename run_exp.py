@@ -8,10 +8,9 @@ from experiments import *
 from utils.helpers import validate_output_folder
 
 parser = argparse.ArgumentParser(description="Run an experiment based on parameters specified in a configuration file")
-parser.add_argument('--config-file', default='config_files/prediction_avgcost-td.json',
-                    help='location of the config file for the experiment (default: config_files/diff-q.json)')
-parser.add_argument('--exp', default='run_exp_learning_prediction',
-                    help='"run_exp_learning_prediction" or "run_exp_learning_control"')
+parser.add_argument('--config-file', required=True,
+                    help='location of the config file for the experiment')
+parser.add_argument('--exp', default='run_exp_learning_control_no_eval')
 parser.add_argument('--cfg-start', default=0)
 parser.add_argument('--cfg-end', default=-1)
 parser.add_argument('--output-folder', default='results/')
