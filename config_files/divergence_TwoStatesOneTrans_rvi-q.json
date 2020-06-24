@@ -1,0 +1,32 @@
+{
+  "exp_name": "TwoStateTrans_div_eps_1.0",
+  "env": "TwoStatesTransientMDP",
+  "agent": "RVIQlearningAgent",
+  "exp_parameters":
+  {
+    "num_runs": 50,
+    "num_max_steps": 1000,
+    "eval_every_n_steps": 1,
+    "save_weights": 1,
+    "num_weights": 4
+  },
+  "env_parameters":
+  {
+
+  },
+  "agent_parameters":
+  {
+    "fixed_parameters":
+    {
+      "policy_type": "egreedy",
+      "epsilon": 1.0,
+      "f_type": "reference_sa",
+      "reference_state": 0,
+      "reference_action": 0
+    },
+    "sweep_parameters":
+    {
+      "alpha_w": [0.0001, 0.001, 0.025, 0.05, 0.1, 0.2, 0.4, 0.8, 1.0]
+    }
+  }
+}
