@@ -26,3 +26,11 @@ Optional parameters for deploying experiments at scale:
 - `cfg-end`: the end index of the list of configurations for this script (refer to `utils/sweeper.py` for more details) 
 
 Check out the jupyter notebook `learning_planning_exps.ipynb` for sample experiments and the plots reported in the paper.
+
+
+--- 
+
+Requirements:
+- `python3` (tested with 3.7.6)
+- `numpy` (tested with 1.18.1)
+- `tqdm` (tested with 4.40.2)
