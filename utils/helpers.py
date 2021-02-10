@@ -22,7 +22,8 @@ def all_files_with_prefix_and_suffix(location, prefix, suffix):
 
 def get_weights_from_npy(filename):
     data = np.load(filename, allow_pickle=True).item()
-    weights = data['weights']
+    weights = np.mean(data['weights_final'], axis=0)
+    print(weights)
 
     return weights
 

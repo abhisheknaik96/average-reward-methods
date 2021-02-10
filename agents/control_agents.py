@@ -1,7 +1,7 @@
 from agents.base_agent import BaseAgent
 import numpy as np
 from utils.helpers import get_weights_from_npy
-
+from utils.tilecoding import TileCoder
 
 class LFAControlAgent(BaseAgent):
     """
@@ -22,6 +22,7 @@ class LFAControlAgent(BaseAgent):
         self.choose_action = None                       # the policy (e-greedy/greedy/random)
         self.max_action = None                          # the greedy action for Q-learning-esque update
 
+        self.tilecoder = None
         self.weights = None
         self.avg_reward = None
         self.avg_value = None
@@ -107,7 +108,23 @@ class LFAControlAgent(BaseAgent):
         # assert "num_actions" in agent_info
         # self.num_actions = agent_info.get("num_actions", 4)
         # assert "num_states" in agent_info
-        # self.num_states = agent_info["num_states"]
+        if "num_states" in agent_info:
+            self.num_states = agent_info["num_states"]  # if this needs to be over-written
+        self.bias = agent_info.get("bias", False)
+        if self.bias:
+            self.num_states += 1
+        self.tilecoder = agent_info.get("tilecoder", False)
+        if self.tilecoder:
+            num_tilings = agent_info.get("num_tilings", 8)
+            assert "dims" in agent_info
+            dims = agent_info["dims"]
+            assert "limits" in agent_info
+            limits = agent_info["limits"]
+
+            self.tilecoder = TileCoder(dims=dims, limits=limits, tilings=num_tilings,
+                                       style='vector')
+            self.num_states = self.tilecoder.n_tiles
+
         self.alpha_w = agent_info.get("alpha_w", 0.1)
         self.eta = agent_info.get("eta", 1)
         # self.alpha_r = agent_info.get("alpha_r", self.alpha_w)
@@ -148,7 +165,8 @@ class LFAControlAgent(BaseAgent):
         Returns:
             (integer) the first action the agent takes.
         """
-
+        if self.tilecoder:
+            observation = self.tilecoder.__getitem__(observation)
         self.past_action = self.choose_action(observation)
         self.past_state = self.get_representation(observation, self.past_action)
         self.timestep += 1
@@ -210,6 +228,12 @@ class DifferentialQlearningAgent_v1(LFAControlAgent):
         maximum lower-order action value for the given observation.
         Note: this is not max_a q_f(s,a)
         """
+        # q_s = np.array([self.get_value(self.get_representation(observation, a)) for a in self.actions])
+        # max_action = self.rand_generator.choice(np.argwhere(q_s == np.amax(q_s)).flatten())
+        #
+        # q_f_s = np.array([self.get_value_f(self.get_representation(observation, a)) for a in self.actions])
+        # return q_f_s[max_action]
+
         q_f_sa = self.get_value_f(self.get_representation(observation, self.max_action))
         return q_f_sa
 
@@ -220,6 +244,7 @@ class DifferentialQlearningAgent_v1(LFAControlAgent):
         self.avg_value = 0.0
         self.alpha_w_f = agent_info.get("alpha_w_f", 0.1)
         self.eta_f = agent_info.get("eta_f", 1)
+        # self.alpha_r_f = agent_info.get("alpha_r_f", self.alpha_w_f)
         self.alpha_r_f = self.eta_f * self.alpha_w_f
 
     def agent_step(self, reward, observation):
@@ -236,9 +261,53 @@ class DifferentialQlearningAgent_v1(LFAControlAgent):
         Note: the step size parameters are separate for the value function and the reward rate in the code,
                 but will be assigned the same value in the agent parameters agent_info
         """
+        if self.tilecoder:
+            observation = self.tilecoder.__getitem__(observation)
+
         delta = reward - self.avg_reward + self.max_action_value(observation) - self.get_value(self.past_state)
         self.weights += self.alpha_w * delta * self.past_state
         # self.avg_reward += self.beta * (reward - self.avg_reward)
+        self.avg_reward += self.alpha_r * delta
+        delta_f = self.get_value(self.past_state) - self.avg_value + \
+                  self.max_action_value_f(observation) - self.get_value_f(self.past_state)
+        self.weights_f += self.alpha_w_f * delta_f * self.past_state
+        self.avg_value += self.alpha_r_f * delta_f
+
+        action = self.choose_action(observation)
+        state = self.get_representation(observation, action)
+        self.past_state = state
+        self.past_action = action
+        # self.step_size *= 0.9995
+        # self.beta *= 0.9995
+
+        return self.past_action
+
+    def planning_update(self, obs, action, reward, obs_next):
+        feature_vec = self.get_representation(obs, action)
+        delta = reward - self.avg_reward + self.max_action_value(obs_next) - self.get_value(feature_vec)
+        self.weights += self.alpha_w * delta * feature_vec
+        self.avg_reward += self.alpha_r * delta
+
+
+class DifferentialQlearningAgent_v2(DifferentialQlearningAgent_v1):
+    """
+    Extends the newly-proposed Differential Q-learning algorithm
+    such that centering affects the learning process
+    """
+
+    def agent_step(self, reward, observation):
+        """A step taken by the agent.
+        Performs the Direct RL step, chooses the next action.
+        Args:
+            reward (float): the reward received for taking the last action taken
+            observation : ndarray
+                the state observation from the environment's step based on where
+                the agent ended up after the last step
+        Returns:
+            (integer) The action the agent takes given this observation.
+        """
+        delta = reward - self.avg_reward + self.max_action_value(observation) - self.get_value(self.past_state)
+        self.weights += self.alpha_w * (delta - self.avg_value) * self.past_state
         self.avg_reward += self.alpha_r * delta
         delta_f = self.get_value(self.past_state) - self.avg_value + \
                   self.max_action_value_f(observation) - self.get_value_f(self.past_state)
@@ -265,22 +334,88 @@ class RVIQlearningAgent(LFAControlAgent):
         self.f_type = None
         self.reference_s = None     # raw state index
         self.reference_a = None     # raw action index
-        self.reference_sa = None    # representation corresponding to this s-a pair
+        self.reference_sa_rep = None    # representation corresponding to this s-a pair
+        self.reference_s_rep = None     # representation corresponding to just this reference_s
+        self.max_val = None             # for tracking the maximum action value when f_type=max_all_sa
+        self.max_val_rep = None         # for tracking the representation corresponding to the above
+        self.last_updated_rep = None    # required for max_all_sa computation
+        self.f_sample_mean = None
 
     def agent_init(self, agent_info):
         super().agent_init(agent_info)
 
         self.f_type = agent_info.get('f_type', 'reference_sa')
+        self.reference_s = agent_info.get('reference_state', 0)
+        self.reference_a = agent_info.get('reference_action', 0)
+        self.max_val = agent_info.get('max_val_init', -np.inf)
+
+    def setup_f(self, observation):
+        # this means state representation is tabular/one-hot
         if self.f_type == 'reference_sa':
-            self.reference_s = agent_info.get('reference_state', 0)
-            self.reference_a = agent_info.get('reference_action', 0)
+            self.reference_s_rep = np.zeros(observation.shape)
+            self.reference_s_rep[self.reference_s] = 1
+            self.reference_sa_rep = self.get_representation(self.reference_s_rep, self.reference_a)
+        # also implies state representation is tabular/one-hot
+        elif self.f_type == 'max_a_reference_s':
+            self.reference_s_rep = np.zeros(observation.shape)
+            self.reference_s_rep[self.reference_s] = 1
+        # either tabular representation or arbitrary features
+        elif self.f_type == 'first_s':
+            self.reference_s_rep = observation
+            self.reference_sa_rep = self.get_representation(self.reference_s_rep, self.reference_a)
+        # either tabular representation or arbitrary features
+        # setup-wise, same as first_s with an arbitrary s and a.
+        elif self.f_type == 'max_all_sa':
+            self.reference_s_rep = observation
+            self.last_updated_rep = self.get_representation(self.reference_s_rep, self.reference_a)
+        # correctly computes the mean for one-hot features;
+        # is a gross approximation in case of LFA with binary features
+        elif self.f_type == 'mean':
+            num_weights = self.weights.size
+            self.reference_sa_rep = np.ones(num_weights) * 1./num_weights
+        # # better approximation of mean of all Q(s,a)
+        # elif self.f_type == 'sample_mean':
+        #     self.f_sample_mean = 0
+        elif self.f_type == 'all_ones':
+            self.reference_sa_rep = np.ones(self.weights.shape)
+        elif self.f_type == 'random_bernoulli':
+            self.reference_sa_rep = self.rand_generator.binomial(n=1, p=0.5, size=self.weights.shape)
+
+    def get_f_value(self):
+        f = None    # the value that shall be returned
+        if self.f_type == 'reference_sa':
+            f = self.get_value(self.reference_sa_rep)
+        elif self.f_type == 'max_a_reference_s':
+            f = self.max_action_value(self.reference_s_rep)
+        elif self.f_type == 'first_s':
+            f = self.get_value(self.reference_sa_rep)
+        elif self.f_type == 'max_all_sa':
+            ### self.max_val = max(self.max_val, self.get_value(self.past_state))
+            past_val = self.get_value(self.last_updated_rep)
+            # if the newly-computed value is larger, update
+            if self.max_val < past_val:
+                self.max_val = past_val
+                self.max_val_rep = self.last_updated_rep
+            # if it isn't, but it is corresponding to the s-a pair that had yielded the max previously,
+            # update the max as the value of that s-a pair might have decreased
+            elif (self.max_val_rep == self.last_updated_rep).all():
+                self.max_val = past_val
+            f = self.max_val
+        elif self.f_type == 'mean':
+            f = self.get_value(self.reference_sa_rep)
+        elif self.f_type == 'all_ones':
+            f = self.get_value(self.reference_sa_rep)
+        elif self.f_type == 'random_bernoulli':
+            f = self.get_value(self.reference_sa_rep)
+        return f
 
     def agent_start(self, observation):
-        action = super().agent_start(observation)
-        ref_state = np.zeros(observation.shape)
-        ref_state[self.reference_s] = 1
-        self.reference_sa = self.get_representation(ref_state, self.reference_a)
-        return action
+        if self.tilecoder:
+            observation = self.tilecoder.__getitem__(observation)
+        self.past_action = self.choose_action(observation)
+        self.past_state = self.get_representation(observation, self.past_action)
+        self.setup_f(observation)
+        return self.past_action
 
     def agent_step(self, reward, observation):
         """A step taken by the agent.
@@ -293,12 +428,16 @@ class RVIQlearningAgent(LFAControlAgent):
         Returns:
             (integer) The action the agent takes given this observation.
         """
-        self.avg_reward = self.get_value(self.reference_sa)
+        if self.tilecoder:
+            observation = self.tilecoder.__getitem__(observation)
+
+        self.avg_reward = self.get_f_value()
         delta = reward - self.avg_reward + self.max_action_value(observation) - self.get_value(self.past_state)
         self.weights += self.alpha_w * delta * self.past_state
 
         action = self.choose_action(observation)
         state = self.get_representation(observation, action)
+        self.last_updated_rep = self.past_state
         self.past_state = state
         self.past_action = action
 
@@ -404,15 +543,70 @@ class Algo3Agent(LFAControlAgent):
 
         return self.past_action
 
-# Tests
 
+# class ActorCriticAgent(ReinforceAgent):
+#     """
+#     Episodic/Continuing Actor-Critic for control
+#     """
+#
+#     def __init__(self, agent_info={}):
+#         super().__init__(agent_info)
+#
+#         self.w = np.zeros(self.num_features)
+#         self.alpha_v = agent_info.get('alpha_v', 2e-2)
+#
+#         self.past_obs = None
+#         self.past_action = None
+#         self.gamma_decay = None
+#
+#     def start(self, observation):
+#         """called for the first action given an observation"""
+#         action = self.choose_action(observation)
+#         self.past_obs = observation
+#         self.past_action = action
+#         self.gamma_decay = 1
+#         return action
+#
+#     def step(self, reward, observation):
+#         """returns an action given an observation, updates the actor and critic parameters"""
+#
+#         tmp = np.array([self.get_sa_representation(self.past_obs, a) for a in range(self.num_actions)])
+#         pi = self.get_pi(self.past_obs)
+#         grad_ln = self.get_sa_representation(self.past_obs, self.past_action) - np.dot(pi, tmp)
+#         v = np.dot(self.w, self.get_s_representation(self.past_obs))
+#         v_next = np.dot(self.w, self.get_s_representation(observation))
+#         delta = reward + self.gamma*v_next - v
+#         grad_v = self.get_s_representation(self.past_obs)
+#
+#         self.theta += self.alpha * self.gamma_decay * delta * grad_ln
+#         self.w += self.alpha_v * self.gamma_decay * delta * grad_v
+#
+#         self.gamma_decay *= self.gamma
+#         action = self.choose_action(observation)
+#         return action
+#
+#     def end(self, reward):
+#         """updates the actor and critic parameters for the final time in an episode (not called for continuing tasks)"""
+#
+#         tmp = np.array([self.get_sa_representation(self.past_obs, a) for a in range(self.num_actions)])
+#         pi = self.get_pi(self.past_obs)
+#         grad_ln = self.get_sa_representation(self.past_obs, self.past_action) - np.dot(pi, tmp)
+#         v = np.dot(self.w, self.get_s_representation(self.past_obs))
+#         delta = reward - v
+#         grad_v = self.get_s_representation(self.past_obs)
+#
+#         self.theta += self.alpha * self.gamma_decay * delta * grad_ln
+#         self.w += self.alpha_v * self.gamma_decay * delta * grad_v
+
+
+# Tests
 
 def test_DiffQ():
 
-    agent = DifferentialQlearningAgent_v1({'num_states': 3, 'num_actions': 3})
+    agent = DifferentialQlearningAgent_v1({'num_states': 3, 'num_actions': 3, 'alpha_w_f': 0.0})
     agent.agent_init({'random_seed': 32, 'epsilon': 0.5})
-    agent.weights = np.array([1, 2, 1, -2, 0, -1, 0, 1, 1]) * 1.0
-    observation = np.array([1, 0, 1])
+    agent.weights = np.array([1, 2, 1, -2, 0, -1, 0, 1, 1, 1, 0, 0]) * 1.0
+    observation = np.array([1, -1, 0.5])
     action = agent.agent_start(observation)
     print(agent.past_state, action)
 
@@ -424,15 +618,17 @@ def test_DiffQ():
 def test_RVIQ():
 
     agent = RVIQlearningAgent({'num_states': 3, 'num_actions': 3})
-    agent.agent_init({'random_seed': 32, 'epsilon': 0.5})
+    agent.agent_init({'random_seed': 32, 'epsilon': 0.5, 'f_type': 'max_all_sa'})
     agent.weights = np.array([1, 2, 1, -2, 0, -1, 0, 1, 1]) * 1.0
     observation = np.array([1, 0, 1])
     action = agent.agent_start(observation)
-    print(agent.reference_sa)
+    # print(agent.reference_sa)
+    print(agent.max_val)
     print(agent.past_state, action)
 
     for i in range(3):
         agent.agent_step(1, observation)
+        print(agent.max_val)
         print(agent.past_state, agent.past_action)
 
 
@@ -467,8 +663,27 @@ def test_Algo3():
         print(agent.past_state, agent.past_action)
 
 
+def test_DiffQ_planning_update():
+
+    agent = DifferentialQlearningAgent_v1({'num_states': 3, 'num_actions': 2, 'alpha_w_f': 0.0})
+    agent.agent_init({'random_seed': 32})
+    agent.weights = np.zeros(6)
+
+    for i in range(5):
+        obs = np.random.binomial(n=1, p=0.5, size=3)
+        action = np.random.choice(2)
+        reward = 1
+        obs_next = np.random.binomial(n=1, p=0.5, size=3)
+        print(obs, action, reward, obs_next)
+        agent.planning_update(obs, action, reward, obs_next)
+        print(agent.weights)
+        print(agent.avg_reward)
+        print()
+
+
 if __name__ == '__main__':
     # test_DiffQ()
     # test_RVIQ()
     # test_R()
-    test_Algo3()
+    # test_Algo3()
+    test_DiffQ_planning_update()

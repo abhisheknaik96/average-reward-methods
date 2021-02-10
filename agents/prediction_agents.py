@@ -18,6 +18,8 @@ class LFAPredictionAgent(BaseAgent):
         self.alpha_r = None
         self.value_init = None
         self.avg_reward_init = None
+        self.alpha_w_decay_rate = None
+        self.alpha_r_decay_rate = None
 
         self.weights = None
         self.avg_reward = None
@@ -44,6 +46,7 @@ class LFAPredictionAgent(BaseAgent):
             (Integer) The action taken w.r.t. the aforementioned policy
         # ToDo: at some point, assign choose_action a separate method based on agent_info["policy"],
         # just like in control_agents
+        # ToDo: for the general case, allow policy to depend on state
         """
 
         action = self.rand_generator.choice(self.actions, p=self.b)
@@ -87,6 +90,8 @@ class LFAPredictionAgent(BaseAgent):
         self.eta = agent_info.get("eta", 1)
         # self.alpha_r = agent_info.get("alpha_r", self.alpha_w)
         self.alpha_r = self.eta * self.alpha_w
+        self.alpha_w_decay_rate = agent_info.get("alpha_w_decay_rate", 1.0)
+        self.alpha_r_decay_rate = agent_info.get("alpha_r_decay_rate", self.alpha_w_decay_rate)
         self.value_init = agent_info.get("value_init", 0)
         self.avg_reward_init = agent_info.get("avg_reward_init", 0)
 
@@ -126,7 +131,9 @@ class LFAPredictionAgent(BaseAgent):
 
         self.past_action = self.choose_action(observation)
         self.past_state = self.get_representation(observation, -1)
+        # ToDo: very hacky, specific to TwoChoice
         self.past_rho = self.pi[self.past_action] / self.b[self.past_action] if self.past_state[0]==1 else 1.0
+        # self.past_rho = self.pi[self.past_action] / self.b[self.past_action]
         self.timestep += 1
 
         return self.past_action
@@ -185,7 +192,9 @@ class DifferentialTDAgent(LFAPredictionAgent):
         self.weights_f = np.zeros(self.num_states)
         self.avg_value = 0.0
         self.alpha_w_f = agent_info.get("alpha_w_f", 0.1)
-        self.alpha_r_f = agent_info.get("alpha_r_f", self.alpha_w_f)
+        # self.alpha_r_f = agent_info.get("alpha_r_f", self.alpha_w_f)
+        self.eta_f = agent_info.get("eta_f", 1)
+        self.alpha_r_f = self.eta_f * self.alpha_w_f
 
     def agent_step(self, reward, observation):
         """A step taken by the agent.
@@ -197,9 +206,6 @@ class DifferentialTDAgent(LFAPredictionAgent):
                 the agent ended up after the last step
         Returns:
             (integer) The action the agent takes given this observation.
-
-        Note: the step size parameters are separate for the value function and the reward rate in the code,
-                but will be assigned the same value in the agent parameters agent_info
         """
         action = self.choose_action(observation)
         state = self.get_representation(observation, -1)
@@ -214,8 +220,12 @@ class DifferentialTDAgent(LFAPredictionAgent):
 
         self.past_state = state
         self.past_action = action
-        # ToDo: very hacky and specific to state 0's actions in TwoLoop; make more general
+        # ToDo: very hacky, specific to TwoChoice
         self.past_rho = self.pi[self.past_action] / self.b[self.past_action] if self.past_state[0]==1 else 1.0
+        # self.past_rho = self.pi[self.past_action] / self.b[self.past_action]
+
+        self.alpha_w *= self.alpha_w_decay_rate
+        self.alpha_r *= self.alpha_r_decay_rate
 
         return self.past_action
 
@@ -235,19 +245,22 @@ class AvgCostTDAgent(LFAPredictionAgent):
                 the agent ended up after the last step
         Returns:
             (integer) The action the agent takes given this observation.
-
-        Note: the step size parameters are separate for the value function and the reward rate in the code,
-                but will be assigned the same value by default unless otherwise specified in agent_info
         """
         action = self.choose_action(observation)
         state = self.get_representation(observation, -1)
         delta = reward - self.avg_reward + self.get_value(state) - self.get_value(self.past_state)
-        self.weights += self.alpha_w * delta * self.past_state
+        self.weights += self.alpha_w * self.past_rho * delta * self.past_state
         self.error = (reward - self.avg_reward)
-        self.avg_reward += self.alpha_r * (reward - self.avg_reward)
+        self.avg_reward += self.alpha_r * self.past_rho * (reward - self.avg_reward)
 
         self.past_state = state
         self.past_action = action
+        # ToDo: very hacky, specific to TwoChoice
+        self.past_rho = self.pi[self.past_action] / self.b[self.past_action] if self.past_state[0]==1 else 1.0
+        # self.past_rho = self.pi[self.past_action] / self.b[self.past_action]
+
+        self.alpha_w *= self.alpha_w_decay_rate
+        self.alpha_r *= self.alpha_r_decay_rate
 
         return self.past_action
 

@@ -1,0 +1,35 @@
+{
+    "exp_name": "Catcher_DiffQ_eps_0.1_tile",
+    "env": "Catcher",
+    "agent": "DifferentialQlearningAgent_v1",
+    "exp_parameters":
+    {
+        "num_runs": 10,
+        "num_max_steps": 400000,
+        "eval_every_n_steps": 10000,
+        "save_weights": 1,
+        "num_weights": 4096
+    },
+    "env_parameters":
+    {
+        "render": false
+    },
+    "agent_parameters":
+    {
+        "fixed_parameters":
+        {
+            "tilecoder": true,
+            "num_tilings": 8,
+            "dims": [3, 3, 3, 3],
+            "limits": [[0, 1], [-1, 1], [0, 1], [-0.5, 1]],
+            "policy_type": "egreedy",
+            "epsilon": 0.1,
+            "alpha_w_f": 0.0
+        },
+        "sweep_parameters":
+        {
+            "alpha_w": [0.04, 0.02, 0.01, 0.005, 0.0025, 0.00125],
+            "eta": [1.0, 0.5, 0.1]
+        }
+    }
+}

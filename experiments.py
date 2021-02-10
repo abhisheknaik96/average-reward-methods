@@ -1,13 +1,11 @@
 import numpy as np
 from tqdm import tqdm
 import copy
-import json
 from utils.rl_glue import RLGlue
+import json
+import sys
 
 
-# Runs a control experiment in which the training steps are interleaved with evaluation periods,
-# when and how long are specified in the configuration parameters.
-# Typically used when the behaviour policy is very different from the target policy, say when epsilon=1.
 def run_exp_learning_control(env, agent, config):
     num_runs = config['exp_parameters']['num_runs']
     max_steps = config['exp_parameters']['num_max_steps']
@@ -79,6 +77,7 @@ def run_exp_learning_control(env, agent, config):
 
             reward, obs, action, _ = rl_glue.rl_step()
             rewards_all_train[run][timestep] = reward
+            # avg_rewards_all[run][timestep] = rl_glue.agent.avg_reward
         weights_final[run] = rl_glue.agent.weights
 
     tqdm.write('Train_RewardRate_total\t= %f' % (np.mean(rewards_all_train)))
@@ -98,14 +97,13 @@ def run_exp_learning_control(env, agent, config):
     return log_data
 
 
-# Runs a control experiment in which the training steps are *not* interleaved with evaluation periods.
-# Typically used when the behaviour policy is very similar to the target policy, say when epsilon=0.1.
 def run_exp_learning_control_no_eval(env, agent, config):
     num_runs = config['exp_parameters']['num_runs']
     max_steps = config['exp_parameters']['num_max_steps']
     eval_every_n_steps = config['exp_parameters']['eval_every_n_steps']
     save_weights = config['exp_parameters'].get('save_weights', 0)
     num_weights = config['exp_parameters'].get('num_weights', 1)
+    save_counts = config['exp_parameters'].get('save_visitation_counts', False)
 
     env_info = config['env_parameters']
     agent_info = config['agent_parameters']
@@ -114,12 +112,13 @@ def run_exp_learning_control_no_eval(env, agent, config):
 
     log_data = {}
     rewards_all_train = np.zeros((num_runs, max_steps+1))
-    # avg_rewards_all = np.zeros((num_runs, max_steps))
+    avg_rewards_all = np.zeros((num_runs, max_steps+1))
     assert max_steps % eval_every_n_steps == 0  # ideally not necessary, but enforcing nonetheless
     weights_final = np.zeros((num_runs, num_weights))
     weights_all = np.zeros((num_runs, int(max_steps/eval_every_n_steps) + 1, num_weights))
     avg_v_all = np.zeros((num_runs, int(max_steps/eval_every_n_steps) + 1))
     avg_r_all = np.zeros((num_runs, int(max_steps/eval_every_n_steps) + 1))
+    counts_all = np.zeros((num_runs, 11, 4, 2))    # for collecting AccessControl visitations
 
     for run in tqdm(range(num_runs)):
 
@@ -145,18 +144,25 @@ def run_exp_learning_control_no_eval(env, agent, config):
 
             reward, obs, action, _ = rl_glue.rl_step()
             rewards_all_train[run][timestep] = reward
+            avg_rewards_all[run][timestep] = rl_glue.agent.avg_reward
         weights_final[run] = rl_glue.agent.weights
+        if save_counts:
+            counts_all[run] = rl_glue.environment.counts
+        # ToDo: add a rl_glue.cleanup() step here (PuckWorld visualization needs it, for instance)
 
     tqdm.write('Train_RewardRate_total\t= %f' % (np.mean(rewards_all_train)))
     tqdm.write('Train_RewardRate_lasthalf\t= %f\n' % np.mean(rewards_all_train[:,rewards_all_train.shape[1]//2:]))
-    tqdm.write('AgentRewardRate_total\t= %f' % np.mean(avg_r_all))
-    tqdm.write('AgentRewardRate_lasthalf\t= %f\n' % np.mean(avg_r_all[:,avg_r_all.shape[1]//2:]))
+    tqdm.write('AgentRewardRate_total\t= %f' % np.mean(avg_rewards_all))
+    tqdm.write('AgentRewardRate_lasthalf\t= %f\n' % np.mean(avg_rewards_all[:,avg_rewards_all.shape[1]//2:]))
     log_data['rewards_all_train'] = rewards_all_train
     log_data['weights_final'] = weights_final
+
     if save_weights:
         log_data['weights_all'] = weights_all
         log_data['avg_v_all'] = avg_v_all
         log_data['avg_r_all'] = avg_r_all
+    if save_counts:
+        log_data['visitation_counts'] = counts_all
 
     return log_data
 
@@ -205,13 +211,13 @@ def get_agent_weights(agent):
     return agent_weights
 
 
-# Runs a prediction experiment in which the learned values are evaluated every few training steps
 def run_exp_learning_prediction(env, agent, config):
     num_runs = config['exp_parameters']['num_runs']
     max_steps = config['exp_parameters']['num_max_steps']
     eval_every_n_steps = config['exp_parameters']['eval_every_n_steps']
     save_weights = config['exp_parameters'].get('save_weights', 0)
     num_weights = config['exp_parameters'].get('num_weights', 1)
+    reward_scale_factor = config['env_parameters'].get('reward_scale_factor', 1)
 
     env_info = config['env_parameters']
     agent_info = config['agent_parameters']
@@ -250,12 +256,12 @@ def run_exp_learning_prediction(env, agent, config):
             if timestep % eval_every_n_steps == 0:
                 # agent_weights = get_agent_weights(rl_glue.agent)
                 agent_weights = rl_glue.agent.weights - rl_glue.agent.avg_value
-                rmsve_all[run][eval_idx] = compute_rmsve(np.array(centered_values['v_pi'])*env_info["reward_scale_factor"], agent_weights,
+                rmsve_all[run][eval_idx] = compute_rmsve(np.array(centered_values['v_pi'])*reward_scale_factor, agent_weights,
                                                          centered_values['d_pi'])
-                rmsve_tvr_all[run][eval_idx] = compute_rmsve_tvr(np.array(centered_values['v_pi'])*env_info["reward_scale_factor"], agent_weights,
+                rmsve_tvr_all[run][eval_idx] = compute_rmsve_tvr(np.array(centered_values['v_pi'])*reward_scale_factor, agent_weights,
                                                           centered_values['d_pi'])
                 avg_r_all[run][eval_idx] = rl_glue.agent.avg_reward
-                rre_all[run][eval_idx] = (centered_values['r_pi'] - rl_glue.agent.avg_reward)**2
+                rre_all[run][eval_idx] = (centered_values['r_pi']*reward_scale_factor - rl_glue.agent.avg_reward)**2
                 error_all[run][eval_idx] = rl_glue.agent.error
 
                 if save_weights:
@@ -278,17 +284,96 @@ def run_exp_learning_prediction(env, agent, config):
     log_data['rmsve_tvr_all'] = rmsve_tvr_all
     log_data['avg_r_all'] = avg_r_all
     log_data['error_all'] = error_all
-    log_data['rre_all'] = error_all
+    log_data['rre_all'] = rre_all
     if save_weights:
         log_data['weights_all'] = weights_all
         log_data['avg_v_all'] = avg_v_all
 
     return log_data
 
+def tabular_sample_based_planning(env_class, agent_class, config):
+    num_runs = config['exp_parameters']['num_runs']
+    max_steps = config['exp_parameters']['num_max_steps']
+    eval_every_n_steps = config['exp_parameters']['eval_every_n_steps']
+    save_weights = config['exp_parameters'].get('save_weights', 0)
+    num_weights = config['exp_parameters'].get('num_weights', 1)
+    save_counts = config['exp_parameters'].get('save_visitation_counts', False)
 
-if __name__=='__main__':
+    env_info = config['env_parameters']
+    agent_info = config['agent_parameters']
+
+    print('Env: %s, Agent: %s' % (env_class.__name__, agent_class.__name__))
+
+    log_data = {}
+    rewards_all_train = np.zeros((num_runs, max_steps+1))
+    avg_rewards_all = np.zeros((num_runs, max_steps+1))
+    assert max_steps % eval_every_n_steps == 0  # ideally not necessary, but enforcing nonetheless
+    weights_final = np.zeros((num_runs, num_weights))
+    weights_all = np.zeros((num_runs, int(max_steps/eval_every_n_steps) + 1, num_weights))
+    avg_v_all = np.zeros((num_runs, int(max_steps/eval_every_n_steps) + 1))
+    avg_r_all = np.zeros((num_runs, int(max_steps/eval_every_n_steps) + 1))
+    counts_all = np.zeros((num_runs, 11, 4, 2))    # for collecting AccessControl visitations
+
+    for run in tqdm(range(num_runs)):
+
+        agent_info['random_seed'] = run
+        env_info['random_seed'] = run
+
+        env = env_class()
+        agent = agent_class({'num_states': env.num_states,
+                             'num_actions': env.num_actions})
+        env.env_init(env_info)
+        agent.agent_init(agent_info)
+
+        planning_dist = {'states': np.array(list(range(env.num_states))),
+                         'actions':np.array(list(range(env.num_actions)))}
+
+        eval_idx = 0
+
+        for timestep in range(max_steps+1):
+
+            if timestep % eval_every_n_steps == 0:
+                if save_weights:
+                    weights_all[run][eval_idx] = agent.weights
+                    avg_v_all[run][eval_idx] = agent.avg_value
+                    avg_r_all[run][eval_idx] = agent.avg_reward
+                eval_idx += 1
+
+            s = agent.rand_generator.choice(planning_dist['states'])
+            a = agent.rand_generator.choice(planning_dist['actions'])
+            obs, action, reward, obs_next = env.env_sample(s,a)
+            agent.planning_update(obs, action, reward, obs_next)
+
+            rewards_all_train[run][timestep] = reward
+            avg_rewards_all[run][timestep] = agent.avg_reward
+        weights_final[run] = agent.weights
+        if save_counts:
+            counts_all[run] = env.counts
+        # ToDo: add a rl_glue.cleanup() step here (PuckWorld visualization needs it, for instance)
+
+    tqdm.write('Train_RewardRate_total\t= %f' % (np.mean(rewards_all_train)))
+    tqdm.write('Train_RewardRate_lasthalf\t= %f\n' % np.mean(rewards_all_train[:,rewards_all_train.shape[1]//2:]))
+    tqdm.write('AgentRewardRate_total\t= %f' % np.mean(avg_rewards_all))
+    tqdm.write('AgentRewardRate_lasthalf\t= %f\n' % np.mean(avg_rewards_all[:,avg_rewards_all.shape[1]//2:]))
+    log_data['rewards_all_train'] = rewards_all_train
+    log_data['weights_final'] = weights_final
+    if save_weights:
+        log_data['weights_all'] = weights_all
+        log_data['avg_v_all'] = avg_v_all
+        log_data['avg_r_all'] = avg_r_all
+    if save_counts:
+        log_data['visitation_counts'] = counts_all
+
+    return log_data
+
+
+def test_RMSVE():
     target = np.array([0.0, 0.0, 0.0, 0.0])
     weights = np.array([1.0, 1.0, 1.0, 1.0])
     weighting = np.array([0.25, 0.25, 0.25, 0.25])
     print('RMSVE: %.2f' % compute_rmsve(target, weights, weighting))
     print('RMSVE_TVR: %.2f' % compute_rmsve_tvr(target, weights, weighting))
+
+
+if __name__=='__main__':
+    test_RMSVE()

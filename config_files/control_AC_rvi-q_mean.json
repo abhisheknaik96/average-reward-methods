@@ -1,14 +1,14 @@
 {
-    "exp_name": "TwoChoice_DiffQ_eps_0.1_alpha_0.4_eta_0.5",
-    "env": "TwoChoiceMDP",
+    "exp_name": "AC_RVIQ_mean_eps_0.1",
+    "env": "AccessControl",
     "agent": "DifferentialQlearningAgent_v1",
     "exp_parameters":
     {
         "num_runs": 30,
-        "num_max_steps": 10000,
-        "eval_every_n_steps": 1,
+        "num_max_steps": 80000,
+        "eval_every_n_steps": 500,
         "save_weights": 1,
-        "num_weights": 18
+        "num_weights": 88
     },
     "env_parameters":
     {
@@ -20,13 +20,11 @@
         {
             "policy_type": "egreedy",
             "epsilon": 0.1,
-            "alpha_w": 0.4,
-            "eta": 0.5
+            "eta": 0.011
         },
         "sweep_parameters":
         {
-            "alpha_w_f": [0.025, 0.05, 0.1, 0.2, 0.4, 0.8],
-            "eta_f": [0.125, 0.25, 0.5, 1, 2]
+            "alpha_w": [0.0015625, 0.00625, 0.025, 0.1, 0.4]
         }
     }
 }
